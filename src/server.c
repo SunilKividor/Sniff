@@ -5,6 +5,7 @@
 #include <netdb.h>
 #include <string.h>
 #include <unistd.h>
+#include <fcntl.h>
 
 #define BUF_SIZE 1028
 #define MAX_LISTEN_BACKLOG 3
@@ -74,25 +75,24 @@ int main(int argc,char *argv[]) {
         char request[BUF_SIZE];
         read(clinet_socket_fd,request,BUF_SIZE);
 
-        FILE *fp = fopen("index.html","r");
-        fseek(fp,0,SEEK_END);
-        long fsize = ftell(fp);
-        fseek(fp,0,SEEK_SET);
+        int fileFD = open("index.html",O_RDONLY);
+        off_t size = lseek(fileFD,0,SEEK_END);
+        lseek(fileFD,0,SEEK_SET);
 
-        char *html_content = malloc(fsize +1);
-        fread(html_content,1,fsize,fp);
-        html_content[fsize] = 0;
-        fclose(fp);
+        char *html_content = malloc(size +1);
+        read(fileFD,html_content,size);
+        html_content[size] = 0;
+        close(fileFD);
 
         char header[256];
         sprintf(header,
             "HTTP/1.1 200 OK\r\n"
             "Content-Type: text/html\r\n"
-            "Content-Length: %ld\r\n"
-            "\r\n", fsize);
+            "Content-Length: %lld\r\n"
+            "\r\n", size);
         
             write(clinet_socket_fd,header,strlen(header));
-            write(clinet_socket_fd,html_content,fsize);
+            write(clinet_socket_fd,html_content,size);
             free(html_content);
     }
 
