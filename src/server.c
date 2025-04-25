@@ -7,9 +7,10 @@
 #include <unistd.h>
 
 #define BUF_SIZE 1028
+#define MAX_LISTEN_BACKLOG 3
 
 int main(int argc,char *argv[]) {
-    if(argc != 3) {
+    if(argc != 2) {
         fprintf(stderr,"Usage: %s port\n",argv[2]);
         exit(EXIT_FAILURE);
     }
@@ -26,7 +27,7 @@ int main(int argc,char *argv[]) {
     hints.ai_protocol = IPPROTO_TCP;
     hints.ai_flags = AI_PASSIVE;
 
-    int getaddrinfo_error = getaddrinfo(NULL,argv[2],&hints,&addrs);
+    int getaddrinfo_error = getaddrinfo(NULL,argv[1],&hints,&addrs);
     if(getaddrinfo_error != 0) {
         fprintf(stderr,"getaddrinfo: %s \n",gai_strerror(getaddrinfo_error));
         exit(EXIT_FAILURE);
@@ -56,7 +57,44 @@ int main(int argc,char *argv[]) {
         exit(EXIT_FAILURE);
     }
 
-    printf("server socket fd : %d",server_socket_fd);
+    if(listen(server_socket_fd,MAX_LISTEN_BACKLOG) != 0) {
+        fprintf(stderr,"error listening to socket %d\n",server_socket_fd);
+        exit(EXIT_FAILURE);   
+    }
+
+
+    int clinet_socket_fd;
+    while(1) {
+        clinet_socket_fd = accept(server_socket_fd,NULL,NULL);
+        if(clinet_socket_fd == -1) {
+            fprintf(stderr,"Could not accpet\n");
+            exit(1);
+        }
+
+        char request[BUF_SIZE];
+        read(clinet_socket_fd,request,BUF_SIZE);
+
+        FILE *fp = fopen("index.html","r");
+        fseek(fp,0,SEEK_END);
+        long fsize = ftell(fp);
+        fseek(fp,0,SEEK_SET);
+
+        char *html_content = malloc(fsize +1);
+        fread(html_content,1,fsize,fp);
+        html_content[fsize] = 0;
+        fclose(fp);
+
+        char header[256];
+        sprintf(header,
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Type: text/html\r\n"
+            "Content-Length: %ld\r\n"
+            "\r\n", fsize);
+        
+            write(clinet_socket_fd,header,strlen(header));
+            write(clinet_socket_fd,html_content,fsize);
+            free(html_content);
+    }
 
     return 0;
 }
