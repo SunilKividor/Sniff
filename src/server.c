@@ -6,9 +6,42 @@
 #include <string.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <pthread.h>
 
 #define BUF_SIZE 1028
-#define MAX_LISTEN_BACKLOG 3
+#define MAX_LISTEN_BACKLOG 10
+
+void* handle_client(void *arg) {
+    printf("Client thread started\n");
+    
+    int client_fd = *(int *)arg;
+    free(arg);
+
+    char request[BUF_SIZE];
+    read(client_fd,request,BUF_SIZE);
+
+    int fileFD = open("index.html",O_RDONLY);
+    off_t size = lseek(fileFD,0,SEEK_END);
+    lseek(fileFD,0,SEEK_SET);
+
+    char *html_content = malloc(size +1);
+    read(fileFD,html_content,size);
+    html_content[size] = 0;
+    close(fileFD);
+
+    char header[256];
+    sprintf(header,
+        "HTTP/1.1 200 OK\r\n"
+        "Content-Type: text/html\r\n"
+        "Content-Length: %lld\r\n"
+        "\r\n", size);
+    
+        write(client_fd,header,strlen(header));
+        write(client_fd,html_content,size);
+        free(html_content);
+    
+        return NULL;
+}
 
 int main(int argc,char *argv[]) {
     if(argc != 2) {
@@ -21,7 +54,7 @@ int main(int argc,char *argv[]) {
 
     int server_socket_fd;
     int so_reuseaddr;
-
+ 
     memset(&hints,0,sizeof(struct addrinfo));
     hints.ai_family = AF_INET;
     hints.ai_socktype = SOCK_STREAM;
@@ -34,7 +67,7 @@ int main(int argc,char *argv[]) {
         exit(EXIT_FAILURE);
     }
 
-    for(addr_iter = addrs;addr_iter != NULL;addr_iter = addrs->ai_next) {
+    for(addr_iter = addrs;addr_iter != NULL;addr_iter = addr_iter->ai_next) {
         server_socket_fd =  socket(addr_iter->ai_family,addr_iter->ai_socktype,addr_iter->ai_protocol);
 
         if(server_socket_fd == -1) {
@@ -63,37 +96,18 @@ int main(int argc,char *argv[]) {
         exit(EXIT_FAILURE);   
     }
 
-
-    int clinet_socket_fd;
     while(1) {
-        clinet_socket_fd = accept(server_socket_fd,NULL,NULL);
-        if(clinet_socket_fd == -1) {
+        int *client_socket_fd = malloc(sizeof(int));
+        *client_socket_fd = accept(server_socket_fd,NULL,NULL);
+        if(*client_socket_fd == -1) {
             fprintf(stderr,"Could not accpet\n");
-            exit(1);
+            free(client_socket_fd);
+            continue;
         }
 
-        char request[BUF_SIZE];
-        read(clinet_socket_fd,request,BUF_SIZE);
-
-        int fileFD = open("index.html",O_RDONLY);
-        off_t size = lseek(fileFD,0,SEEK_END);
-        lseek(fileFD,0,SEEK_SET);
-
-        char *html_content = malloc(size +1);
-        read(fileFD,html_content,size);
-        html_content[size] = 0;
-        close(fileFD);
-
-        char header[256];
-        sprintf(header,
-            "HTTP/1.1 200 OK\r\n"
-            "Content-Type: text/html\r\n"
-            "Content-Length: %lld\r\n"
-            "\r\n", size);
-        
-            write(clinet_socket_fd,header,strlen(header));
-            write(clinet_socket_fd,html_content,size);
-            free(html_content);
+        pthread_t tid;
+        pthread_create(&tid,NULL,handle_client,client_socket_fd);
+        pthread_detach(tid);
     }
 
     return 0;
