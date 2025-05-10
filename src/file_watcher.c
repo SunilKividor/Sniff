@@ -32,8 +32,7 @@ pthread_t start_file_watcher(const char *filePathName)
     return tid;
 }
 
-void *watch_file(void *args)
-{
+void *watch_file(void *args) {
     watch_file_args_t watcher_args = *(watch_file_args_t *)args;
 
     char *filePathName = watcher_args.filePathName;
@@ -52,8 +51,6 @@ void *watch_file(void *args)
         close(fd);
         return NULL;
     }
-
-    printf("[FILE WATCHER] Watching file : %s", filePathName);
 
     char buffer[EVENT_BUF_LEN];
 
@@ -84,7 +81,6 @@ void *watch_file(void *args)
 
         inotify_rm_watch(fd, wd);
         close(fd);
-
         return NULL;
     }
 
