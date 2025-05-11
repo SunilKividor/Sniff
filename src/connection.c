@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <fcntl.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -14,6 +15,32 @@
 #include "../includes/connection.h"
 
 #define GUID "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+
+
+void send_websocket_frame(int client_fd,const char* message) {
+    size_t msg_len = strlen(message);
+    uint8_t *frame = malloc(10 + msg_len);
+
+    size_t pos = 0;
+    frame[pos++] = 0x81;
+
+    if(msg_len <= 125) {
+        frame[pos++] = msg_len;
+    } else if (msg_len <= 65535) {
+        frame[pos++] = 126;
+        frame[pos++] = (msg_len >> 8) & 0xFF;
+        frame[pos++] = msg_len & 0xFF;
+    } else {
+        frame[pos++] = 127;
+        for(int i=7;i>=0;--i){
+            frame[pos++] = (msg_len >> (8 * i)) & 0xFF;
+        }
+    }
+
+    memcpy(&frame[pos],message,msg_len);
+    pos += msg_len;
+    send(client_fd,frame,pos, 0);
+}
 
 char* base64_encode(const unsigned char* input, int length) {
     BIO *b64 = BIO_new(BIO_f_base64());
@@ -52,11 +79,9 @@ void handle_websocket_connection(int client_fd,char request[BUF_SIZE]) {
 
     unsigned char sha1_result[SHA_DIGEST_LENGTH];
     SHA1((unsigned char*)accept_seed,strlen(accept_seed),sha1_result);
-    printf("Sha1 Result sha1_result: %s",sha1_result);
 
-    //encoding base64
+    // base64
     char* accept_key = base64_encode(sha1_result,SHA_DIGEST_LENGTH);
-    printf("Base64 Encoded accept_key: %s",accept_key);
 
     char response[1024];
     snprintf(response,sizeof(response),
@@ -66,12 +91,28 @@ void handle_websocket_connection(int client_fd,char request[BUF_SIZE]) {
         "Sec-WebSocket-Accept: %s\r\n\r\n",
         accept_key);
 
-    write(client_fd,response,strlen(response));
+    send(client_fd,response,strlen(response),0);
     free(accept_key);
 
-    printf("✅ WebSocket handshake completed.\n");
+    printf("WebSocket handshake completed.\n");
 
-    
+    //index.html
+    int fileFD = open("/home/ubuntu/simple-tcp-server/src/index.html",O_RDONLY);
+    if(fileFD == -1) {
+        perror("open index.html");
+        close(client_fd);
+    }
+    off_t size = lseek(fileFD,0,SEEK_END);
+    lseek(fileFD,0,SEEK_SET);
+
+    char *html_content = malloc(size +1);
+    read(fileFD,html_content,size);
+    html_content[size] = 0;
+    close(fileFD);
+
+    send_websocket_frame(client_fd,html_content);
+
+    free(html_content);
 }
 
 void* handle_client(void *arg) {
@@ -99,7 +140,7 @@ void* handle_client(void *arg) {
     if(fileFD == -1) {
         perror("open index.html");
         close(client_fd);
-        pthread_exit(NULL);
+       return NULL;
     }
     off_t size = lseek(fileFD,0,SEEK_END);
     lseek(fileFD,0,SEEK_SET);
