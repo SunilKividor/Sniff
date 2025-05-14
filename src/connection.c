@@ -110,36 +110,18 @@ int process_websocket_handshake(int client_fd, char *buffer)
     return 1;
 }
 
-void *handle_websocket_connection(void *arg)
-{
-    printf("Inside handle_websocket_connection\n");
-    ws_handler_args_t ws_handler_arg = *(ws_handler_args_t *)arg;
+void add_client(int client_fd,ws_clients_t* ws_clients) {
+    pthread_mutex_lock(&ws_clients->mutex);
 
-    int client_fd = *(ws_handler_arg.client_socket_fd);
-    ws_clients_t ws_clients = *(ws_handler_arg.ws_clients);
-
-    printf("Client fd: %d\n", client_fd);
-    printf("Total Clients: %d\n", ws_clients.count);
-
-    free(arg);
-
-    char buffer[BUF_SIZE] = {0};
-    int bytes_read = recv(client_fd, buffer, BUF_SIZE, 0);
-
-    printf("Bytes read: %d\n", bytes_read);
-
-    if (process_websocket_handshake(client_fd, buffer))
-    {
-        // add the client to the monitoring list
-    }
-    else
-    {
-        perror("error processing websocket handshake");
-        close(client_fd);
-        return NULL;
+    if(ws_clients->count < MAX_WS_CLIENTS) {
+        ws_clients->client_sockets[ws_clients->count++] = client_fd;
+        printf("Client added at index %d\n", ws_clients->count - 1);
     }
 
-    // index.html
+    pthread_mutex_unlock(&ws_clients->mutex);
+}
+
+void broadcast_message(int client_fd) {
     int fileFD = open("/home/ubuntu/simple-tcp-server/src/index.html", O_RDONLY);
     if (fileFD == -1)
     {
@@ -159,10 +141,39 @@ void *handle_websocket_connection(void *arg)
     free(html_content);
 }
 
+void *handle_websocket_connection(void *arg)
+{
+    printf("Inside handle_websocket_connection\n");
+    ws_handler_args_t ws_handler_arg = *(ws_handler_args_t *)arg;
+
+    int client_fd = *(ws_handler_arg.client_socket_fd);
+    ws_clients_t* ws_clients = ws_handler_arg.ws_clients;
+
+    free(arg);
+
+    char buffer[BUF_SIZE] = {0};
+    int bytes_read = recv(client_fd, buffer, BUF_SIZE, 0);
+
+    printf("Bytes read: %d\n", bytes_read);
+
+    if (process_websocket_handshake(client_fd, buffer))
+    {
+        add_client(client_fd,ws_clients);
+        broadcast_message(client_fd);
+    }
+    else
+    {
+        perror("error processing websocket handshake");
+        close(client_fd);
+        return NULL;
+    }
+}
+
 void *handle_http_client(void *arg)
 {
 
     int client_fd = *(int *)arg;
+    free(arg);
 
     printf("Client fd: %d\n", client_fd);
 

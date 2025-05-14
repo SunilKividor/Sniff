@@ -23,13 +23,6 @@
 #define COLOR_CYAN "\033[36m"
 #define COLOR_RESET "\033[0m"
 
-typedef struct
-{
-    ws_clients_t *clients;
-    bool *file_changed;
-    pthread_mutex_t *mutex;
-} ws_monitor_args_t;
-
 int is_websocket_connection(char *buffer)
 {
     printf("Checking connection type...\n");
@@ -41,22 +34,89 @@ int is_websocket_connection(char *buffer)
     return 0;
 }
 
+void *ws_monitor(void *arg)
+{
+    ws_monitor_args_t *ws_monitor_args = (ws_monitor_args_t *)arg;
+
+    file_watcher_args_t *file_watcher_args = ws_monitor_args->file_watcher_args;
+    ws_clients_t *ws_clients = ws_monitor_args->clients;
+
+    while (1)
+    {
+        pthread_mutex_lock(file_watcher_args->mutex);
+
+        while (!(*file_watcher_args->file_changed))
+        {
+            pthread_cond_wait(file_watcher_args->cond, file_watcher_args->mutex);
+        }
+
+        *file_watcher_args->file_changed = 0;
+        pthread_mutex_unlock(file_watcher_args->mutex);
+
+        printf("file changed.Update ws clients\n");
+    }
+
+    return NULL;
+}
+
+pthread_t start_monitoring_file(void *args)
+{
+    pthread_t tid;
+    pthread_create(&tid, NULL, ws_monitor, args);
+    pthread_detach(tid);
+    return tid;
+}
+
 int main(int argc, char *argv[])
 {
-    char *filePathName = "./src/index.html";
-    int initFileWatcher = init_file_watcher(filePathName);
+
+    char *filePath = "./src/index.html";
+
+    int* fileChanged = malloc(sizeof(int));
+    *fileChanged = 0;
+
+    // initializing websocket args
+    ws_clients_t *ws_clients = malloc(sizeof(ws_clients_t)); // creating ws clients for global use
+    memset(ws_clients->client_sockets, 0, sizeof(ws_clients->client_sockets));
+    ws_clients->count = 0;
+    pthread_mutex_init(&ws_clients->mutex, NULL);
+
+    // initializing file watcher args
+    file_watcher_args_t *file_watcher_args = malloc(sizeof(file_watcher_args_t));
+    file_watcher_args->filePath = filePath;
+    // file_watcher_args->file_changed = malloc(sizeof(int));
+    file_watcher_args->file_changed = fileChanged;
+    file_watcher_args->cond = malloc(sizeof(pthread_cond_t));
+    pthread_cond_init(file_watcher_args->cond, NULL);
+    file_watcher_args->mutex = malloc(sizeof(pthread_mutex_t));
+    pthread_mutex_init(file_watcher_args->mutex, NULL);
+
+    //initializingf monitor args
+    ws_monitor_args_t* ws_monitor_args = malloc(sizeof(ws_monitor_args_t));
+    ws_monitor_args->clients = ws_clients;
+    ws_monitor_args->file_watcher_args = file_watcher_args;
+
+    // initializing file watcher
+    int initFileWatcher = init_file_watcher(filePath);
     if (initFileWatcher == -1)
     {
         perror("[FILE WATCHER] Error Initializing File Watcher");
         return -1;
     }
 
-    if (start_file_watcher(filePathName) < 0)
+    // starting file notifier
+    if (start_file_watcher(file_watcher_args) < 0)
     {
         perror("[FILE WATCHER] Error starting File Watcher thread");
         return -1;
     }
 
+    if(start_monitoring_file(ws_monitor_args) < 0) {
+        perror("[MONITOR] Error starting monitor thread");
+        return -1;
+    }
+
+    // starting server
     int server_socket_fd = startServer();
 
     printf("%s%s┃                                               ┃%s\n", BOLD, COLOR_GREEN, COLOR_RESET);
@@ -68,8 +128,6 @@ int main(int argc, char *argv[])
     printf("%s%s┃                                               ┃%s\n", BOLD, COLOR_GREEN, COLOR_RESET);
     printf("%s%s┃  %s[FILE WATCHER]:%s %-28s ┃%s\n", BOLD, COLOR_GREEN, COLOR_YELLOW, COLOR_CYAN, "RUNNING", COLOR_RESET);
     printf("%s%s┃                                               ┃%s\n", BOLD, COLOR_GREEN, COLOR_RESET);
-
-    ws_clients_t *ws_clients = malloc(sizeof(ws_clients_t) * MAX_WS_CLIENTS); // creating ws clients for global use
 
     while (1)
     {

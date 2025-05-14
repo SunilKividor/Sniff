@@ -7,6 +7,7 @@
 #include <string.h>
 
 #include "../includes/file_watcher.h"
+#include "../includes/server.h"
 
 #define EVENT_BUF_LEN (1024 * (sizeof(struct inotify_event) + 16))
 
@@ -19,23 +20,17 @@ int init_file_watcher(const char *filePathName)
     return 1;
 }
 
-pthread_t start_file_watcher(const char *filePathName)
+pthread_t start_file_watcher(void *args)
 {
-    watch_file_args_t *args = malloc(sizeof(watch_file_args_t));
-
-    args->filePathName = strdup(filePathName);
-    args->file_changed = false;
-
     pthread_t tid;
     pthread_create(&tid, NULL, watch_file, args);
     pthread_detach(tid);
     return tid;
 }
 
-void *watch_file(void *args) {
-    watch_file_args_t watcher_args = *(watch_file_args_t *)args;
-
-    char *filePathName = watcher_args.filePathName;
+void *watch_file(void *args)
+{
+    file_watcher_args_t watcher_args = *(file_watcher_args_t *)args;
 
     int fd = inotify_init();
     if (fd < 0)
@@ -44,7 +39,7 @@ void *watch_file(void *args) {
         return NULL;
     }
 
-    int wd = inotify_add_watch(fd, filePathName, IN_MODIFY);
+    int wd = inotify_add_watch(fd, watcher_args.filePath, IN_MODIFY);
     if (wd < 0)
     {
         perror("Error initiating inotify");
@@ -69,8 +64,11 @@ void *watch_file(void *args) {
             struct inotify_event *event = (struct inotify_event *)&buffer[i];
             if (event->mask & IN_MODIFY)
             {
-                printf("[FILE WATCHER] file modified: %s\n", filePathName);
-                // notify somehow to the clients to refresh or reload with new file changes
+                printf("[FILE WATCHER] file modified: %s\n", watcher_args.filePath);
+                pthread_mutex_lock(watcher_args.mutex);
+                *watcher_args.file_changed = 1;
+                pthread_cond_signal(watcher_args.cond);
+                pthread_mutex_unlock(watcher_args.mutex);
             }
 
             // Size of the inotify_event structure plus the length of the file name.
@@ -78,11 +76,9 @@ void *watch_file(void *args) {
             // If watching a single file directly, event->len will be 0.
             i += sizeof(struct inotify_event) + event->len;
         }
-
-        inotify_rm_watch(fd, wd);
-        close(fd);
-        return NULL;
     }
 
+    inotify_rm_watch(fd, wd);
+    close(fd);
     return NULL;
 }
