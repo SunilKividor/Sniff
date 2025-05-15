@@ -14,10 +14,11 @@
 
 #include "../includes/connection.h"
 #include "../includes/server.h"
+#include "../includes/websockets.h"
 
 #define GUID "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 
-void send_websocket_frame(int client_fd, const char *message)
+void send_websocket_frame(ws_clients_t *clients, const char *message)
 {
     size_t msg_len = strlen(message);
     uint8_t *frame = malloc(10 + msg_len);
@@ -46,7 +47,17 @@ void send_websocket_frame(int client_fd, const char *message)
 
     memcpy(&frame[pos], message, msg_len);
     pos += msg_len;
-    send(client_fd, frame, pos, 0);
+
+    int i = 0;
+    if (clients->count > 0)
+    {
+        while (i < clients->count)
+        {
+            int client_fd = clients->client_sockets[i];
+            send(client_fd, frame, pos, 0);
+            i++;
+        }
+    }
 }
 
 char *base64_encode(const unsigned char *input, int length)
@@ -110,10 +121,12 @@ int process_websocket_handshake(int client_fd, char *buffer)
     return 1;
 }
 
-void add_client(int client_fd,ws_clients_t* ws_clients) {
+void add_client(int client_fd, ws_clients_t *ws_clients)
+{
     pthread_mutex_lock(&ws_clients->mutex);
 
-    if(ws_clients->count < MAX_WS_CLIENTS) {
+    if (ws_clients->count < MAX_WS_CLIENTS)
+    {
         ws_clients->client_sockets[ws_clients->count++] = client_fd;
         printf("Client added at index %d\n", ws_clients->count - 1);
     }
@@ -121,12 +134,13 @@ void add_client(int client_fd,ws_clients_t* ws_clients) {
     pthread_mutex_unlock(&ws_clients->mutex);
 }
 
-void broadcast_message(int client_fd) {
+char *get_message()
+{
     int fileFD = open("/home/ubuntu/simple-tcp-server/src/index.html", O_RDONLY);
     if (fileFD == -1)
     {
         perror("open index.html");
-        close(client_fd);
+        return NULL;
     }
     off_t size = lseek(fileFD, 0, SEEK_END);
     lseek(fileFD, 0, SEEK_SET);
@@ -136,9 +150,22 @@ void broadcast_message(int client_fd) {
     html_content[size] = 0;
     close(fileFD);
 
-    send_websocket_frame(client_fd, html_content);
+    return html_content;
+}
 
-    free(html_content);
+void broadcast_message(ws_clients_t *clients, char *message)
+{
+
+    if (clients->count > 0)
+    {
+        send_websocket_frame(clients, message);
+    }
+    else
+    {
+        printf("[WEBSOCKETS: NO ACTIVE CLIENTS]\n");
+    }
+
+    free(message);
 }
 
 void *handle_websocket_connection(void *arg)
@@ -147,7 +174,7 @@ void *handle_websocket_connection(void *arg)
     ws_handler_args_t ws_handler_arg = *(ws_handler_args_t *)arg;
 
     int client_fd = *(ws_handler_arg.client_socket_fd);
-    ws_clients_t* ws_clients = ws_handler_arg.ws_clients;
+    ws_clients_t *ws_clients = ws_handler_arg.ws_clients;
 
     free(arg);
 
@@ -158,8 +185,9 @@ void *handle_websocket_connection(void *arg)
 
     if (process_websocket_handshake(client_fd, buffer))
     {
-        add_client(client_fd,ws_clients);
-        broadcast_message(client_fd);
+        add_client(client_fd, ws_clients);
+        char *message = get_message();
+        broadcast_message(ws_clients, message);
     }
     else
     {

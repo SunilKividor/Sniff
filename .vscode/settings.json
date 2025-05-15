@@ -2,6 +2,7 @@
     "C_Cpp.default.compilerPath": "/usr/bin/gcc",
     "files.associations": {
         "inotify.h": "c",
-        "connection.h": "c"
+        "connection.h": "c",
+        "socket.h": "c"
     }
 }

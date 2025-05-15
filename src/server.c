@@ -54,6 +54,8 @@ void *ws_monitor(void *arg)
         pthread_mutex_unlock(file_watcher_args->mutex);
 
         printf("file changed.Update ws clients\n");
+        char* message = get_message();
+        broadcast_message(ws_clients,message);
     }
 
     return NULL;

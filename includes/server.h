@@ -22,4 +22,8 @@ typedef struct
     file_watcher_args_t *file_watcher_args;
 } ws_monitor_args_t;
 
+int is_websocket_connection(char *buffer);
+void *ws_monitor(void *arg);
+pthread_t start_monitoring_file(void *args);
+
 #endif
